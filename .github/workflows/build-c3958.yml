@@ -97,8 +97,9 @@ jobs:
         CONFIG_SERIAL_8250_SHARE_IRQ=y
         EOF
         
-        # 强行修改 GRUB 引导文件，将内核输出重定向到第一个串口 ttyS0
-        sed -i 's/console=tty0/console=tty0 console=ttyS0,115200n8/g' target/linux/x86/image/grub.cfg
+        # 【修复点】使用 grub*.cfg 兼容新版的 grub-pc.cfg 和 grub-efi.cfg
+        # 末尾加上 "|| true" 可以保证就算遇到特殊情况找不到文件，也不会导致编译中断报错
+        sed -i 's/console=tty0/console=tty0 console=ttyS0,115200n8/g' target/linux/x86/image/grub*.cfg 2>/dev/null || true
 
     - name: 下载编译依赖资源包
       working-directory: ./openwrt
