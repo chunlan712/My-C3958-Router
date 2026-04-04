@@ -172,22 +172,43 @@ jobs:
     - name: 补丁内核构建脚本 (自动 olddefconfig 解决依赖)
       working-directory: ./openwrt
       run: |
-        # 关键: OpenWrt 每次编译都重新生成 .config 并直接传给内核编译
-        # 我们在 target/linux/Makefile 中，内核编译前插入 olddefconfig
         LINUX_MK="target/linux/Makefile"
-        if ! grep -q 'olddefconfig' "$LINUX_MK"; then
-          echo "=== 给 target/linux/Makefile 打补丁 ==="
-          # 在 "make all modules" 之前插入 olddefconfig 步骤
-          # 找到 $(LINUX_DIR)/.modules 目标的编译命令，在前面加 olddefconfig
-          sed -i '/$(LINUX_DIR)\/\.configured/{
-            n
-            /^.*rm -f.*vmlinux/a\\t$(MAKE) -C $(LINUX_DIR) ARCH="$(LINUX_KARCH)" olddefconfig </dev/null 2>/dev/null || true
-          }' "$LINUX_MK"
-          echo "补丁完成"
-          grep -n -A2 -B2 'olddefconfig' "$LINUX_MK"
-        else
-          echo "已有 olddefconfig 补丁"
-        fi
+        echo "=== 给 target/linux/Makefile 打补丁 ==="
+        # 用 Python 精确找到 "rm -f ... vmlinux" 行，在其后插入 olddefconfig
+        python3 -c "
+import re
+with open('$LINUX_MK', 'r') as f:
+    content = f.read()
+# 找到 .modules 目标里的 'rm -f ... vmlinux' 行，在后面插入 olddefconfig
+old = 'rm -f $(LINUX_DIR)/vmlinux $(LINUX_DIR)/System.map'
+new = old + '\n\t-\$(MAKE) -C \$(LINUX_DIR) ARCH=\"\$(LINUX_KARCH)\" olddefconfig </dev/null'
+if old in content:
+    content = content.replace(old, new)
+    with open('$LINUX_MK', 'w') as f:
+        f.write(content)
+    print('补丁成功: 在 rm vmlinux 后插入 olddefconfig')
+else:
+    # 尝试另一种模式
+    import glob
+    lines = content.split('\n')
+    for i, line in enumerate(lines):
+        if 'rm -f' in line and 'vmlinux' in line and 'LINUX_DIR' in line:
+            indent = '\t'
+            lines.insert(i + 1, indent + '-\$(MAKE) -C \$(LINUX_DIR) ARCH=\"\$(LINUX_KARCH)\" olddefconfig </dev/null')
+            with open('$LINUX_MK', 'w') as f:
+                f.write('\n'.join(lines))
+            print(f'补丁成功: 在第{i+1}行后插入 olddefconfig')
+            break
+    else:
+        print('WARNING: 未找到匹配行，尝试备用方案')
+        # 备用: 在文件末尾添加一个 override
+        content += '\n# Auto olddefconfig patch\noverride define Kernel/Compile/Default\n\t\$(MAKE) -C \$(LINUX_DIR) ARCH=\"\$(LINUX_KARCH)\" olddefconfig </dev/null || true\nendef\n'
+        with open('$LINUX_MK', 'w') as f:
+            f.write(content)
+        print('使用备用方案')
+"
+        echo "=== 验证补丁 ==="
+        grep -n 'olddefconfig' "$LINUX_MK" || echo "WARNING: 补丁可能未生效"
 
     - name: 下载源码包
       working-directory: ./openwrt
