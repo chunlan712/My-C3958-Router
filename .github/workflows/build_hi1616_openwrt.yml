@@ -84,6 +84,7 @@ jobs:
           CONFIG_SCSI_SAS_ATTRS=y
           CONFIG_SCSI_SAS_LIBSAS=y
           CONFIG_SCSI_SAS_HOST_SMP=y
+          CONFIG_SCSI_HISI_SAS_DEBUGFS_DEFAULT_ENABLE=n
           CONFIG_SCSI_MPT3SAS=y
           CONFIG_USB_DWC3=y
           CONFIG_USB_DWC3_DUAL_ROLE=y
@@ -126,8 +127,9 @@ jobs:
       - name: Fix kernel deps
         working-directory: openwrt
         run: |
-          sed -i '/rm -f.*LINUX_DIR.*vmlinux/a\\t-$(MAKE) -C $(LINUX_DIR) olddefconfig </dev/null || true' target/linux/Makefile
-          grep -n olddefconfig target/linux/Makefile || true
+          sed -i '/rm -f.*vmlinux/a\\t-$(MAKE) -C $(LINUX_DIR) olddefconfig </dev/null || true' target/linux/Makefile
+          echo "--- verify olddefconfig ---"
+          grep -n olddefconfig target/linux/Makefile || echo "WARNING: patch not applied"
 
       - name: Download
         working-directory: openwrt
