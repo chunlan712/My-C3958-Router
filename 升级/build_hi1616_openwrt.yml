@@ -8,218 +8,162 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: 检查项目代码
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: 准备编译环境
+    - name: Prepare build environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo apt-get update
-        sudo apt-get -y install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-        gettext git libncurses5-dev libssl-dev python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget xsltproc
+        sudo apt-get -y install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget xsltproc
         sudo apt-get clean
 
-    - name: 拉取 ImmortalWrt 源码
-      run: |
-        git clone -b openwrt-23.05 --depth=1 https://github.com/immortalwrt/immortalwrt.git openwrt
+    - name: Clone ImmortalWrt source
+      run: git clone -b openwrt-23.05 --depth=1 https://github.com/immortalwrt/immortalwrt.git openwrt
 
-    - name: 更新并安装 Feeds
+    - name: Update and install feeds
       working-directory: ./openwrt
       run: |
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 注入升级后的 DTB 文件
+    - name: Inject upgraded DTB
       working-directory: ./openwrt
       run: |
-        DTB_DIR="target/linux/armsr/armv8/base-files/boot"
-        mkdir -p "$DTB_DIR"
-        cp ../dtb-5.x/hisi_p660_evb.dtb "$DTB_DIR/hisi_p660_evb.dtb"
-        echo "DTB 注入完成: $(ls -la $DTB_DIR/)"
+        mkdir -p target/linux/armsr/armv8/base-files/boot
+        cp ../dtb-5.x/hisi_p660_evb.dtb target/linux/armsr/armv8/base-files/boot/hisi_p660_evb.dtb
+        echo "DTB injected OK"
 
-    - name: 生成 .config
+    - name: Generate OpenWrt .config
       working-directory: ./openwrt
       run: |
-        cat <<'EOF' > .config
-        CONFIG_TARGET_armsr=y
-        CONFIG_TARGET_armsr_armv8=y
-        CONFIG_TARGET_armsr_armv8_DEVICE_generic=y
-        CONFIG_PACKAGE_luci=y
-        CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-        CONFIG_PACKAGE_luci-app-openclash=y
-        CONFIG_PACKAGE_dnsmasq-full=y
-        CONFIG_PACKAGE_ca-bundle=y
-        CONFIG_PACKAGE_curl=y
-        CONFIG_PACKAGE_kmod-hns=y
-        CONFIG_PACKAGE_kmod-hns3=y
-        EOF
+        cat > .config << 'OWEOF'
+CONFIG_TARGET_armsr=y
+CONFIG_TARGET_armsr_armv8=y
+CONFIG_TARGET_armsr_armv8_DEVICE_generic=y
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-app-openclash=y
+CONFIG_PACKAGE_dnsmasq-full=y
+CONFIG_PACKAGE_ca-bundle=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_kmod-hns=y
+CONFIG_PACKAGE_kmod-hns3=y
+OWEOF
         make defconfig
 
-    - name: 注入海思平台内核配置
+    - name: Append Hisilicon kernel config
       working-directory: ./openwrt
       run: |
-        KERNEL_CONF="target/linux/armsr/armv8/config-5.15"
-        [ -f "$KERNEL_CONF" ] || KERNEL_CONF=$(find target/linux/armsr -name "config-5.15" | head -n1)
-        [ -z "$KERNEL_CONF" ] && { echo "ERROR: 找不到内核配置文件"; exit 1; }
+        KCONF=$(find target/linux/armsr -name 'config-5.15' | head -n1)
+        [ -z "$KCONF" ] && { echo "ERROR: kernel config not found"; exit 1; }
+        echo "Appending to $KCONF"
+        cat >> "$KCONF" << 'KCEOF'
 
-        echo "内核配置文件: $KERNEL_CONF"
-        cat >> "$KERNEL_CONF" <<'EOF'
+# =============================================
+# HiSilicon HiP05 / PV660 / SD100
+# =============================================
+CONFIG_NET_VENDOR_HISILICON=y
+CONFIG_HISILICON_HNS=y
+CONFIG_HISILICON_HNS_DSAF=y
+CONFIG_HISILICON_HNS_ENET=y
+CONFIG_HNS=y
+CONFIG_HNS_DSAF=y
+CONFIG_HNS_ENET=y
+CONFIG_HNS3=y
+CONFIG_HNS3_HCLGE=y
+CONFIG_HNS3_ENET=y
+CONFIG_HNS_MDIO=y
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_DW=y
+CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_SERIAL_AMBA_PL011=y
+CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
+CONFIG_CONSOLE_POLL=y
+CONFIG_PCI_HISI=y
+CONFIG_PCIEPORTBUS=y
+CONFIG_PCI_HOST_GENERIC=y
+CONFIG_ATA=y
+CONFIG_ATA_PIIX=y
+CONFIG_SATA_AHCI=y
+CONFIG_SATA_AHCI_PLATFORM=y
+CONFIG_SCSI=y
+CONFIG_BLK_DEV_SD=y
+CONFIG_SCSI_HISI_SAS=y
+CONFIG_SCSI_HISI_SAS_V2_HW=y
+CONFIG_SCSI_HISI_SAS_PCI=y
+CONFIG_SCSI_SAS_ATA=y
+CONFIG_SCSI_SAS_ATTRS=y
+CONFIG_SCSI_SAS_LIBSAS=y
+CONFIG_SCSI_SAS_HOST_SMP=y
+CONFIG_SCSI_MPT3SAS=y
+CONFIG_USB_DWC3=y
+CONFIG_USB_DWC3_DUAL_ROLE=y
+CONFIG_GPIO_DWAPB=y
+CONFIG_I2C_DESIGNWARE_PLATFORM=y
+CONFIG_HISILICON_LPC=y
+CONFIG_MFD_SYSCON=y
+CONFIG_REGMAP_MMIO=y
+CONFIG_REGMAP=y
+CONFIG_POWER_RESET_HISI=y
+CONFIG_HISI_THERMAL=y
+CONFIG_HISI_PMU=y
+CONFIG_HW_RANDOM_HISI=y
+CONFIG_HW_RANDOM=y
+CONFIG_EFI_ARMSTUB_DTB_LOADER=y
+CONFIG_RTC_DRV_DS1307=y
+CONFIG_RTC_CLASS=y
+CONFIG_EDAC=y
+CONFIG_EDAC_MM_EDAC=y
+CONFIG_MD=y
+CONFIG_BLK_DEV_MD=y
+CONFIG_MD_RAID1=y
+CONFIG_BONDING=y
+KCEOF
 
-        # =============================================
-        # HiSilicon HiP05 / PV660 / SD100 平台驱动
-        # =============================================
-
-        # --- 海思 HNS 网卡 (内建) ---
-        CONFIG_NET_VENDOR_HISILICON=y
-        CONFIG_HISILICON_HNS=y
-        CONFIG_HISILICON_HNS_DSAF=y
-        CONFIG_HISILICON_HNS_ENET=y
-        CONFIG_HNS=y
-        CONFIG_HNS_DSAF=y
-        CONFIG_HNS_ENET=y
-        CONFIG_HNS3=y
-        CONFIG_HNS3_HCLGE=y
-        CONFIG_HNS3_ENET=y
-        CONFIG_HNS_MDIO=y
-
-        # --- 串口控制台 ---
-        CONFIG_SERIAL_8250=y
-        CONFIG_SERIAL_8250_DW=y
-        CONFIG_SERIAL_8250_CONSOLE=y
-        CONFIG_SERIAL_AMBA_PL011=y
-        CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
-        CONFIG_CONSOLE_POLL=y
-
-        # --- PCIe ---
-        CONFIG_PCI_HISI=y
-        CONFIG_PCIEPORTBUS=y
-        CONFIG_PCI_HOST_GENERIC=y
-
-        # --- SATA/SAS 存储 ---
-        CONFIG_ATA=y
-        CONFIG_ATA_PIIX=y
-        CONFIG_SATA_AHCI=y
-        CONFIG_SATA_AHCI_PLATFORM=y
-        CONFIG_SCSI=y
-        CONFIG_BLK_DEV_SD=y
-        CONFIG_SCSI_HISI_SAS=y
-        CONFIG_SCSI_HISI_SAS_V2_HW=y
-        CONFIG_SCSI_HISI_SAS_PCI=y
-        CONFIG_SCSI_SAS_ATA=y
-        CONFIG_SCSI_SAS_ATTRS=y
-        CONFIG_SCSI_SAS_LIBSAS=y
-        CONFIG_SCSI_SAS_HOST_SMP=y
-        CONFIG_SCSI_MPT3SAS=y
-
-        # --- USB ---
-        CONFIG_USB_DWC3=y
-        CONFIG_USB_DWC3_DUAL_ROLE=y
-
-        # --- GPIO / I2C / LPC ---
-        CONFIG_GPIO_DWAPB=y
-        CONFIG_I2C_DESIGNWARE_PLATFORM=y
-        CONFIG_HISILICON_LPC=y
-
-        # --- 系统控制器 ---
-        CONFIG_MFD_SYSCON=y
-        CONFIG_REGMAP_MMIO=y
-        CONFIG_REGMAP=y
-
-        # --- 电源 / 热管理 / PMU ---
-        CONFIG_POWER_RESET_HISI=y
-        CONFIG_HISI_THERMAL=y
-        CONFIG_HISI_PMU=y
-
-        # --- 硬件随机数 ---
-        CONFIG_HW_RANDOM_HISI=y
-        CONFIG_HW_RANDOM=y
-
-        # --- EFI DTB 覆盖 ---
-        CONFIG_EFI_ARMSTUB_DTB_LOADER=y
-
-        # --- RTC ---
-        CONFIG_RTC_DRV_DS1307=y
-        CONFIG_RTC_CLASS=y
-
-        # --- EDAC ---
-        CONFIG_EDAC=y
-        CONFIG_EDAC_MM_EDAC=y
-
-        # --- MD RAID ---
-        CONFIG_MD=y
-        CONFIG_BLK_DEV_MD=y
-        CONFIG_MD_RAID1=y
-
-        # --- Bonding ---
-        CONFIG_BONDING=y
-        EOF
-
-    - name: 修改 GRUB 引导配置
+    - name: Patch GRUB config
       working-directory: ./openwrt
       run: |
-        GRUB_CFG="target/linux/armsr/image/grub-efi.cfg"
-        [ ! -f "$GRUB_CFG" ] && { echo "ERROR: 找不到 grub-efi.cfg"; exit 1; }
-        cat > "$GRUB_CFG" <<'GRUBEOF'
-        menuentry "@TITLE@" {
-            search --set=root --label kernel
-            devicetree /boot/hisi_p660_evb.dtb
-            linux /efi/openwrt/@KERNEL_NAME@ @GPT_ROOTPART@ @CMDLINE@ console=ttyS0,115200 earlycon=uart8250,mmio32,0x60300000 noinitrd
+        GRUB=$(find target/linux/armsr -name 'grub-efi.cfg' | head -n1)
+        [ -z "$GRUB" ] && { echo "ERROR: grub-efi.cfg not found"; exit 1; }
+        cat > "$GRUB" << 'GEOF'
+menuentry "@TITLE@" {
+    search --set=root --label kernel
+    devicetree /boot/hisi_p660_evb.dtb
+    linux /efi/openwrt/@KERNEL_NAME@ @GPT_ROOTPART@ @CMDLINE@ console=ttyS0,115200 earlycon=uart8250,mmio32,0x60300000 noinitrd
+}
+GEOF
+        echo "GRUB patched:"
+        cat "$GRUB"
+
+    - name: Patch kernel build to auto-run olddefconfig
+      working-directory: ./openwrt
+      run: |
+        MK=target/linux/Makefile
+        echo "=== Patching $MK ==="
+        # Use awk to insert olddefconfig after the line that removes vmlinux
+        # This runs BEFORE "make all modules" so all config deps are resolved
+        awk '
+        /rm -f.*LINUX_DIR.*vmlinux.*System.map/ {
+            print
+            print "\t-$(MAKE) -C $(LINUX_DIR) ARCH=\"$(LINUX_KARCH)\" olddefconfig </dev/null || true"
+            next
         }
-        GRUBEOF
-        cat "$GRUB_CFG"
+        { print }
+        ' "$MK" > "$MK.tmp" && mv "$MK.tmp" "$MK"
+        echo "=== Verify ==="
+        grep -n olddefconfig "$MK" || echo "WARNING: patch may not have applied"
 
-    - name: 补丁内核构建脚本 (自动 olddefconfig 解决依赖)
-      working-directory: ./openwrt
-      run: |
-        LINUX_MK="target/linux/Makefile"
-        echo "=== 给 target/linux/Makefile 打补丁 ==="
-        # 用 Python 精确找到 "rm -f ... vmlinux" 行，在其后插入 olddefconfig
-        python3 -c "
-import re
-with open('$LINUX_MK', 'r') as f:
-    content = f.read()
-# 找到 .modules 目标里的 'rm -f ... vmlinux' 行，在后面插入 olddefconfig
-old = 'rm -f $(LINUX_DIR)/vmlinux $(LINUX_DIR)/System.map'
-new = old + '\n\t-\$(MAKE) -C \$(LINUX_DIR) ARCH=\"\$(LINUX_KARCH)\" olddefconfig </dev/null'
-if old in content:
-    content = content.replace(old, new)
-    with open('$LINUX_MK', 'w') as f:
-        f.write(content)
-    print('补丁成功: 在 rm vmlinux 后插入 olddefconfig')
-else:
-    # 尝试另一种模式
-    import glob
-    lines = content.split('\n')
-    for i, line in enumerate(lines):
-        if 'rm -f' in line and 'vmlinux' in line and 'LINUX_DIR' in line:
-            indent = '\t'
-            lines.insert(i + 1, indent + '-\$(MAKE) -C \$(LINUX_DIR) ARCH=\"\$(LINUX_KARCH)\" olddefconfig </dev/null')
-            with open('$LINUX_MK', 'w') as f:
-                f.write('\n'.join(lines))
-            print(f'补丁成功: 在第{i+1}行后插入 olddefconfig')
-            break
-    else:
-        print('WARNING: 未找到匹配行，尝试备用方案')
-        # 备用: 在文件末尾添加一个 override
-        content += '\n# Auto olddefconfig patch\noverride define Kernel/Compile/Default\n\t\$(MAKE) -C \$(LINUX_DIR) ARCH=\"\$(LINUX_KARCH)\" olddefconfig </dev/null || true\nendef\n'
-        with open('$LINUX_MK', 'w') as f:
-            f.write(content)
-        print('使用备用方案')
-"
-        echo "=== 验证补丁 ==="
-        grep -n 'olddefconfig' "$LINUX_MK" || echo "WARNING: 补丁可能未生效"
-
-    - name: 下载源码包
+    - name: Download sources
       working-directory: ./openwrt
       run: make download -j8
 
-    - name: 编译固件
+    - name: Build firmware
       working-directory: ./openwrt
-      run: |
-        make -j$(nproc) || make -j1 V=s
+      run: make -j$(nproc) || make -j1 V=s
 
-    - name: 上传固件
+    - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
         name: ImmortalWrt-PV660-SD100-ARM64
