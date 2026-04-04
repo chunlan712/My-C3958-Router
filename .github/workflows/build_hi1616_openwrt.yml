@@ -1,4 +1,4 @@
-name: Build ImmortalWrt for HiSilicon PV660 SD100 (ARM64)
+name: Build OpenWrt PV660
 
 on:
   workflow_dispatch:
@@ -6,165 +6,68 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Prepare build environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo apt-get update
-        sudo apt-get -y install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget xsltproc
-        sudo apt-get clean
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get -y install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget xsltproc
 
-    - name: Clone ImmortalWrt source
-      run: git clone -b openwrt-23.05 --depth=1 https://github.com/immortalwrt/immortalwrt.git openwrt
+      - name: Clone source
+        run: git clone -b openwrt-23.05 --depth=1 https://github.com/immortalwrt/immortalwrt.git openwrt
 
-    - name: Update and install feeds
-      working-directory: ./openwrt
-      run: |
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
+      - name: Feeds
+        working-directory: openwrt
+        run: ./scripts/feeds update -a && ./scripts/feeds install -a
 
-    - name: Inject upgraded DTB
-      working-directory: ./openwrt
-      run: |
-        mkdir -p target/linux/armsr/armv8/base-files/boot
-        cp ../dtb-5.x/hisi_p660_evb.dtb target/linux/armsr/armv8/base-files/boot/hisi_p660_evb.dtb
-        echo "DTB injected OK"
+      - name: Config
+        working-directory: openwrt
+        run: |
+          cat > .config << 'CEOF'
+          CONFIG_TARGET_armsr=y
+          CONFIG_TARGET_armsr_armv8=y
+          CONFIG_TARGET_armsr_armv8_DEVICE_generic=y
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          EOF
+          make defconfig
 
-    - name: Generate OpenWrt .config
-      working-directory: ./openwrt
-      run: |
-        cat > .config << 'OWEOF'
-CONFIG_TARGET_armsr=y
-CONFIG_TARGET_armsr_armv8=y
-CONFIG_TARGET_armsr_armv8_DEVICE_generic=y
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-CONFIG_PACKAGE_luci-app-openclash=y
-CONFIG_PACKAGE_dnsmasq-full=y
-CONFIG_PACKAGE_ca-bundle=y
-CONFIG_PACKAGE_curl=y
-CONFIG_PACKAGE_kmod-hns=y
-CONFIG_PACKAGE_kmod-hns3=y
-OWEOF
-        make defconfig
+      - name: Kernel config
+        working-directory: openwrt
+        run: |
+          KCONF=$(find target/linux/armsr -name config-5.15 | head -1)
+          echo "Appending to $KCONF"
+          cat >> "$KCONF" << 'CEOF'
+          CONFIG_NET_VENDOR_HISILICON=y
+          CONFIG_HISILICON_HNS=y
+          CONFIG_HNS=y
+          CONFIG_HNS3=y
+          CONFIG_SERIAL_8250=y
+          CONFIG_SERIAL_8250_DW=y
+          CONFIG_SERIAL_8250_CONSOLE=y
+          CONFIG_PCI_HISI=y
+          CONFIG_ATA=y
+          CONFIG_SCSI=y
+          CONFIG_BLK_DEV_SD=y
+          CONFIG_SCSI_HISI_SAS=y
+          CONFIG_SCSI_HISI_SAS_V2_HW=y
+          CONFIG_BONDING=y
+          CEOF
 
-    - name: Append Hisilicon kernel config
-      working-directory: ./openwrt
-      run: |
-        KCONF=$(find target/linux/armsr -name 'config-5.15' | head -n1)
-        [ -z "$KCONF" ] && { echo "ERROR: kernel config not found"; exit 1; }
-        echo "Appending to $KCONF"
-        cat >> "$KCONF" << 'KCEOF'
+      - name: Fix kernel deps
+        working-directory: openwrt
+        run: |
+          sed -i '/rm -f.*LINUX_DIR.*vmlinux/a\\t-$(MAKE) -C $(LINUX_DIR) olddefconfig </dev/null || true' target/linux/Makefile
+          grep -n olddefconfig target/linux/Makefile || true
 
-# =============================================
-# HiSilicon HiP05 / PV660 / SD100
-# =============================================
-CONFIG_NET_VENDOR_HISILICON=y
-CONFIG_HISILICON_HNS=y
-CONFIG_HISILICON_HNS_DSAF=y
-CONFIG_HISILICON_HNS_ENET=y
-CONFIG_HNS=y
-CONFIG_HNS_DSAF=y
-CONFIG_HNS_ENET=y
-CONFIG_HNS3=y
-CONFIG_HNS3_HCLGE=y
-CONFIG_HNS3_ENET=y
-CONFIG_HNS_MDIO=y
-CONFIG_SERIAL_8250=y
-CONFIG_SERIAL_8250_DW=y
-CONFIG_SERIAL_8250_CONSOLE=y
-CONFIG_SERIAL_AMBA_PL011=y
-CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
-CONFIG_CONSOLE_POLL=y
-CONFIG_PCI_HISI=y
-CONFIG_PCIEPORTBUS=y
-CONFIG_PCI_HOST_GENERIC=y
-CONFIG_ATA=y
-CONFIG_ATA_PIIX=y
-CONFIG_SATA_AHCI=y
-CONFIG_SATA_AHCI_PLATFORM=y
-CONFIG_SCSI=y
-CONFIG_BLK_DEV_SD=y
-CONFIG_SCSI_HISI_SAS=y
-CONFIG_SCSI_HISI_SAS_V2_HW=y
-CONFIG_SCSI_HISI_SAS_PCI=y
-CONFIG_SCSI_SAS_ATA=y
-CONFIG_SCSI_SAS_ATTRS=y
-CONFIG_SCSI_SAS_LIBSAS=y
-CONFIG_SCSI_SAS_HOST_SMP=y
-CONFIG_SCSI_MPT3SAS=y
-CONFIG_USB_DWC3=y
-CONFIG_USB_DWC3_DUAL_ROLE=y
-CONFIG_GPIO_DWAPB=y
-CONFIG_I2C_DESIGNWARE_PLATFORM=y
-CONFIG_HISILICON_LPC=y
-CONFIG_MFD_SYSCON=y
-CONFIG_REGMAP_MMIO=y
-CONFIG_REGMAP=y
-CONFIG_POWER_RESET_HISI=y
-CONFIG_HISI_THERMAL=y
-CONFIG_HISI_PMU=y
-CONFIG_HW_RANDOM_HISI=y
-CONFIG_HW_RANDOM=y
-CONFIG_EFI_ARMSTUB_DTB_LOADER=y
-CONFIG_RTC_DRV_DS1307=y
-CONFIG_RTC_CLASS=y
-CONFIG_EDAC=y
-CONFIG_EDAC_MM_EDAC=y
-CONFIG_MD=y
-CONFIG_BLK_DEV_MD=y
-CONFIG_MD_RAID1=y
-CONFIG_BONDING=y
-KCEOF
+      - name: Download
+        working-directory: openwrt
+        run: make download -j8
 
-    - name: Patch GRUB config
-      working-directory: ./openwrt
-      run: |
-        GRUB=$(find target/linux/armsr -name 'grub-efi.cfg' | head -n1)
-        [ -z "$GRUB" ] && { echo "ERROR: grub-efi.cfg not found"; exit 1; }
-        cat > "$GRUB" << 'GEOF'
-menuentry "@TITLE@" {
-    search --set=root --label kernel
-    devicetree /boot/hisi_p660_evb.dtb
-    linux /efi/openwrt/@KERNEL_NAME@ @GPT_ROOTPART@ @CMDLINE@ console=ttyS0,115200 earlycon=uart8250,mmio32,0x60300000 noinitrd
-}
-GEOF
-        echo "GRUB patched:"
-        cat "$GRUB"
+      - name: Build
+        working-directory: openwrt
+        run: make -j$(nproc) || make -j1 V=s
 
-    - name: Patch kernel build to auto-run olddefconfig
-      working-directory: ./openwrt
-      run: |
-        MK=target/linux/Makefile
-        echo "=== Patching $MK ==="
-        # Use awk to insert olddefconfig after the line that removes vmlinux
-        # This runs BEFORE "make all modules" so all config deps are resolved
-        awk '
-        /rm -f.*LINUX_DIR.*vmlinux.*System.map/ {
-            print
-            print "\t-$(MAKE) -C $(LINUX_DIR) ARCH=\"$(LINUX_KARCH)\" olddefconfig </dev/null || true"
-            next
-        }
-        { print }
-        ' "$MK" > "$MK.tmp" && mv "$MK.tmp" "$MK"
-        echo "=== Verify ==="
-        grep -n olddefconfig "$MK" || echo "WARNING: patch may not have applied"
-
-    - name: Download sources
-      working-directory: ./openwrt
-      run: make download -j8
-
-    - name: Build firmware
-      working-directory: ./openwrt
-      run: make -j$(nproc) || make -j1 V=s
-
-    - name: Upload firmware
-      uses: actions/upload-artifact@v4
-      with:
-        name: ImmortalWrt-PV660-SD100-ARM64
-        path: openwrt/bin/targets/armsr/armv8/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-pv660-arm64
+          path: openwrt/bin/targets/armsr/armv8/*
