@@ -19,6 +19,17 @@ jobs:
         working-directory: openwrt
         run: ./scripts/feeds update -a && ./scripts/feeds install -a
 
+      - name: Inject DTB
+        working-directory: openwrt
+        run: |
+          mkdir -p target/linux/armsr/armv8/base-files/boot
+          if [ -f ../dtb-5.x/hisi_p660_evb.dtb ]; then
+            cp ../dtb-5.x/hisi_p660_evb.dtb target/linux/armsr/armv8/base-files/boot/
+            echo "DTB OK"
+          else
+            echo "WARNING: dtb-5.x/hisi_p660_evb.dtb not found, skip"
+          fi
+
       - name: Config
         working-directory: openwrt
         run: |
@@ -28,7 +39,10 @@ jobs:
           CONFIG_TARGET_armsr_armv8_DEVICE_generic=y
           CONFIG_PACKAGE_luci=y
           CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-          EOF
+          CONFIG_PACKAGE_dnsmasq-full=y
+          CONFIG_PACKAGE_ca-bundle=y
+          CONFIG_PACKAGE_curl=y
+          CEOF
           make defconfig
 
       - name: Kernel config
@@ -39,19 +53,75 @@ jobs:
           cat >> "$KCONF" << 'CEOF'
           CONFIG_NET_VENDOR_HISILICON=y
           CONFIG_HISILICON_HNS=y
+          CONFIG_HISILICON_HNS_DSAF=y
+          CONFIG_HISILICON_HNS_ENET=y
           CONFIG_HNS=y
+          CONFIG_HNS_DSAF=y
+          CONFIG_HNS_ENET=y
           CONFIG_HNS3=y
+          CONFIG_HNS3_HCLGE=y
+          CONFIG_HNS3_ENET=y
+          CONFIG_HNS_MDIO=y
           CONFIG_SERIAL_8250=y
           CONFIG_SERIAL_8250_DW=y
           CONFIG_SERIAL_8250_CONSOLE=y
+          CONFIG_SERIAL_AMBA_PL011=y
+          CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
+          CONFIG_CONSOLE_POLL=y
           CONFIG_PCI_HISI=y
+          CONFIG_PCIEPORTBUS=y
+          CONFIG_PCI_HOST_GENERIC=y
           CONFIG_ATA=y
+          CONFIG_ATA_PIIX=y
+          CONFIG_SATA_AHCI=y
+          CONFIG_SATA_AHCI_PLATFORM=y
           CONFIG_SCSI=y
           CONFIG_BLK_DEV_SD=y
           CONFIG_SCSI_HISI_SAS=y
           CONFIG_SCSI_HISI_SAS_V2_HW=y
+          CONFIG_SCSI_HISI_SAS_PCI=y
+          CONFIG_SCSI_SAS_ATA=y
+          CONFIG_SCSI_SAS_ATTRS=y
+          CONFIG_SCSI_SAS_LIBSAS=y
+          CONFIG_SCSI_SAS_HOST_SMP=y
+          CONFIG_SCSI_MPT3SAS=y
+          CONFIG_USB_DWC3=y
+          CONFIG_USB_DWC3_DUAL_ROLE=y
+          CONFIG_GPIO_DWAPB=y
+          CONFIG_I2C_DESIGNWARE_PLATFORM=y
+          CONFIG_HISILICON_LPC=y
+          CONFIG_MFD_SYSCON=y
+          CONFIG_REGMAP_MMIO=y
+          CONFIG_REGMAP=y
+          CONFIG_POWER_RESET_HISI=y
+          CONFIG_HISI_THERMAL=y
+          CONFIG_HISI_PMU=y
+          CONFIG_HW_RANDOM_HISI=y
+          CONFIG_HW_RANDOM=y
+          CONFIG_EFI_ARMSTUB_DTB_LOADER=y
+          CONFIG_RTC_DRV_DS1307=y
+          CONFIG_RTC_CLASS=y
+          CONFIG_EDAC=y
+          CONFIG_EDAC_MM_EDAC=y
+          CONFIG_MD=y
+          CONFIG_BLK_DEV_MD=y
+          CONFIG_MD_RAID1=y
           CONFIG_BONDING=y
           CEOF
+
+      - name: Patch GRUB
+        working-directory: openwrt
+        run: |
+          GRUB=$(find target/linux/armsr -name grub-efi.cfg | head -1)
+          [ -z "$GRUB" ] && { echo "no grub cfg"; exit 1; }
+          cat > "$GRUB" << 'GEOF'
+          menuentry "@TITLE@" {
+              search --set=root --label kernel
+              devicetree /boot/hisi_p660_evb.dtb
+              linux /efi/openwrt/@KERNEL_NAME@ @GPT_ROOTPART@ @CMDLINE@ console=ttyS0,115200 earlycon=uart8250,mmio32,0x60300000 noinitrd
+          }
+          GEOF
+          cat "$GRUB"
 
       - name: Fix kernel deps
         working-directory: openwrt
