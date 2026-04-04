@@ -33,8 +33,6 @@ jobs:
     - name: 注入升级后的 DTB 文件
       working-directory: ./openwrt
       run: |
-        # 将升级适配 5.x 的 hisi_p660_evb.dtb 放入内核设备树搜索路径
-        # armsr 目标使用标准内核 DTB，我们覆盖到 files overlay 目录
         DTB_DIR="target/linux/armsr/armv8/base-files/boot"
         mkdir -p "$DTB_DIR"
         cp ../dtb-5.x/hisi_p660_evb.dtb "$DTB_DIR/hisi_p660_evb.dtb"
@@ -44,58 +42,35 @@ jobs:
       working-directory: ./openwrt
       run: |
         cat <<'EOF' > .config
-        # ==========================================
-        # 1. 目标平台: armsr ARM64
-        # ==========================================
         CONFIG_TARGET_armsr=y
         CONFIG_TARGET_armsr_armv8=y
         CONFIG_TARGET_armsr_armv8_DEVICE_generic=y
-
-        # ==========================================
-        # 2. LuCI 与中文
-        # ==========================================
         CONFIG_PACKAGE_luci=y
         CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-
-        # ==========================================
-        # 3. OpenClash
-        # ==========================================
         CONFIG_PACKAGE_luci-app-openclash=y
         CONFIG_PACKAGE_dnsmasq-full=y
         CONFIG_PACKAGE_ca-bundle=y
         CONFIG_PACKAGE_curl=y
-
-        # ==========================================
-        # 4. HNS 网卡驱动 (必须内建，否则无网络)
-        # ==========================================
         CONFIG_PACKAGE_kmod-hns=y
         CONFIG_PACKAGE_kmod-hns3=y
         EOF
-
         make defconfig
 
     - name: 注入海思平台内核配置
       working-directory: ./openwrt
       run: |
-        # 找到内核配置文件
         KERNEL_CONF="target/linux/armsr/armv8/config-5.15"
         [ -f "$KERNEL_CONF" ] || KERNEL_CONF=$(find target/linux/armsr -name "config-5.15" | head -n1)
-
-        if [ -z "$KERNEL_CONF" ] || [ ! -f "$KERNEL_CONF" ]; then
-          echo "ERROR: 找不到内核配置文件"
-          exit 1
-        fi
+        [ -z "$KERNEL_CONF" ] && { echo "ERROR: 找不到内核配置文件"; exit 1; }
 
         echo "内核配置文件: $KERNEL_CONF"
-
-        # 追加 HiP05/PV660 必需的内核配置
         cat >> "$KERNEL_CONF" <<'EOF'
 
         # =============================================
         # HiSilicon HiP05 / PV660 / SD100 平台驱动
         # =============================================
 
-        # --- 海思 HNS 网卡 (内建，开机必须可用) ---
+        # --- 海思 HNS 网卡 (内建) ---
         CONFIG_NET_VENDOR_HISILICON=y
         CONFIG_HISILICON_HNS=y
         CONFIG_HISILICON_HNS_DSAF=y
@@ -116,7 +91,7 @@ jobs:
         CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
         CONFIG_CONSOLE_POLL=y
 
-        # --- PCIe (HiSilicon hip05/hip06 控制器) ---
+        # --- PCIe ---
         CONFIG_PCI_HISI=y
         CONFIG_PCIEPORTBUS=y
         CONFIG_PCI_HOST_GENERIC=y
@@ -137,7 +112,7 @@ jobs:
         CONFIG_SCSI_SAS_HOST_SMP=y
         CONFIG_SCSI_MPT3SAS=y
 
-        # --- USB (DesignWare DWC3) ---
+        # --- USB ---
         CONFIG_USB_DWC3=y
         CONFIG_USB_DWC3_DUAL_ROLE=y
 
@@ -146,7 +121,7 @@ jobs:
         CONFIG_I2C_DESIGNWARE_PLATFORM=y
         CONFIG_HISILICON_LPC=y
 
-        # --- 系统控制器 / Regmap ---
+        # --- 系统控制器 ---
         CONFIG_MFD_SYSCON=y
         CONFIG_REGMAP_MMIO=y
         CONFIG_REGMAP=y
@@ -156,47 +131,35 @@ jobs:
         CONFIG_HISI_THERMAL=y
         CONFIG_HISI_PMU=y
 
-        # --- 硬件随机数 (OpenClash TLS 需要) ---
+        # --- 硬件随机数 ---
         CONFIG_HW_RANDOM_HISI=y
         CONFIG_HW_RANDOM=y
 
-        # --- EFI DTB 覆盖 (允许 GRUB devicetree 命令生效) ---
+        # --- EFI DTB 覆盖 ---
         CONFIG_EFI_ARMSTUB_DTB_LOADER=y
 
-        # --- RTC (板载 ds3231) ---
+        # --- RTC ---
         CONFIG_RTC_DRV_DS1307=y
         CONFIG_RTC_CLASS=y
 
-        # --- EDAC (启动日志中可见 edac_hha_c 等) ---
+        # --- EDAC ---
         CONFIG_EDAC=y
         CONFIG_EDAC_MM_EDAC=y
 
-        # --- MD RAID (原系统用了 md, 保留兼容) ---
+        # --- MD RAID ---
         CONFIG_MD=y
         CONFIG_BLK_DEV_MD=y
         CONFIG_MD_RAID1=y
 
-        # --- Bonding (原系统用了 bond0) ---
+        # --- Bonding ---
         CONFIG_BONDING=y
         EOF
 
-        echo "内核配置追加完成"
-
-    - name: 修改 GRUB 引导配置 (注入 DTB + 串口控制台)
+    - name: 修改 GRUB 引导配置
       working-directory: ./openwrt
       run: |
         GRUB_CFG="target/linux/armsr/image/grub-efi.cfg"
-
-        if [ ! -f "$GRUB_CFG" ]; then
-          echo "ERROR: 找不到 grub-efi.cfg"
-          find target/linux/armsr -name "grub*" 2>/dev/null
-          exit 1
-        fi
-
-        echo "=== 原 GRUB 配置 ==="
-        cat "$GRUB_CFG"
-
-        # 在 linux 行之前插入 devicetree 命令，并确保 console 参数正确
+        [ ! -f "$GRUB_CFG" ] && { echo "ERROR: 找不到 grub-efi.cfg"; exit 1; }
         cat > "$GRUB_CFG" <<'GRUBEOF'
         menuentry "@TITLE@" {
             search --set=root --label kernel
@@ -204,49 +167,31 @@ jobs:
             linux /efi/openwrt/@KERNEL_NAME@ @GPT_ROOTPART@ @CMDLINE@ console=ttyS0,115200 earlycon=uart8250,mmio32,0x60300000 noinitrd
         }
         GRUBEOF
-
-        echo ""
-        echo "=== 新 GRUB 配置 ==="
         cat "$GRUB_CFG"
 
-    - name: 确保构建系统复制 boot 目录到 EFI 分区
+    - name: 补丁内核构建脚本 (自动 olddefconfig 解决依赖)
       working-directory: ./openwrt
       run: |
-        # 检查 image/Makefile 中是否有 boot 目录复制逻辑
-        IMAGE_MK="target/linux/armsr/image/Makefile"
-        if grep -q 'boot' "$IMAGE_MK"; then
-          echo "image/Makefile 已包含 boot 目录处理"
-          grep -n 'boot' "$IMAGE_MK"
+        # 关键: OpenWrt 每次编译都重新生成 .config 并直接传给内核编译
+        # 我们在 target/linux/Makefile 中，内核编译前插入 olddefconfig
+        LINUX_MK="target/linux/Makefile"
+        if ! grep -q 'olddefconfig' "$LINUX_MK"; then
+          echo "=== 给 target/linux/Makefile 打补丁 ==="
+          # 在 "make all modules" 之前插入 olddefconfig 步骤
+          # 找到 $(LINUX_DIR)/.modules 目标的编译命令，在前面加 olddefconfig
+          sed -i '/$(LINUX_DIR)\/\.configured/{
+            n
+            /^.*rm -f.*vmlinux/a\\t$(MAKE) -C $(LINUX_DIR) ARCH="$(LINUX_KARCH)" olddefconfig </dev/null 2>/dev/null || true
+          }' "$LINUX_MK"
+          echo "补丁完成"
+          grep -n -A2 -B2 'olddefconfig' "$LINUX_MK"
         else
-          echo "注意: image/Makefile 中没有明确的 boot 目录处理"
-          echo "依赖 base-files overlay 机制自动复制"
+          echo "已有 olddefconfig 补丁"
         fi
 
     - name: 下载源码包
       working-directory: ./openwrt
       run: make download -j8
-
-    - name: 预编译内核配置 (自动解决未解析依赖)
-      working-directory: ./openwrt
-      run: |
-        # 先跑一次完整编译让内核源码解压、.config 生成
-        # 第一次大概率会因为未解析依赖失败，这是预期行为
-        echo "=== 第一次编译 (可能失败，用于生成内核 .config) ==="
-        make target/linux/compile V=s || true
-
-        # 找到内核源码目录
-        KDIR=$(find build_dir -maxdepth 4 -name linux-5.15.* -type d | head -1)
-        if [ -n "$KDIR" ] && [ -d "$KDIR" ] && [ -f "$KDIR/.config" ]; then
-          echo "=== 对内核 .config 运行 olddefconfig ==="
-          cd "$KDIR"
-          make ARCH=arm64 olddefconfig </dev/null 2>&1 || true
-          cd $OLDPWD
-          echo "=== olddefconfig 完成 ==="
-          # 显示新增的 CONFIG
-          grep 'SCSI_HISI_SAS\|HISI_SAS_PCI\|SAS_ATA\|SAS_HOST_SMP' "$KDIR/.config" || true
-        else
-          echo "WARNING: 未找到内核源码或 .config，跳过 olddefconfig"
-        fi
 
     - name: 编译固件
       working-directory: ./openwrt
