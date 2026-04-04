@@ -130,6 +130,7 @@ jobs:
         CONFIG_BLK_DEV_SD=y
         CONFIG_SCSI_HISI_SAS=y
         CONFIG_SCSI_HISI_SAS_V2_HW=y
+        CONFIG_SCSI_HISI_SAS_PCI=y
         CONFIG_SCSI_SAS_ATA=y
         CONFIG_SCSI_SAS_ATTRS=y
         CONFIG_SCSI_SAS_LIBSAS=y
@@ -228,17 +229,23 @@ jobs:
     - name: 预编译内核配置 (自动解决未解析依赖)
       working-directory: ./openwrt
       run: |
-        # 先让 OpenWrt 准备好内核源码和 .config
-        make target/linux/prepare V=s || true
-        # 找到内核源码目录并运行 olddefconfig 自动补全所有依赖
+        # 先跑一次完整编译让内核源码解压、.config 生成
+        # 第一次大概率会因为未解析依赖失败，这是预期行为
+        echo "=== 第一次编译 (可能失败，用于生成内核 .config) ==="
+        make target/linux/compile V=s || true
+
+        # 找到内核源码目录
         KDIR=$(find build_dir -maxdepth 4 -name linux-5.15.* -type d | head -1)
-        if [ -n "$KDIR" ] && [ -d "$KDIR" ]; then
-          echo "内核源码: $KDIR"
+        if [ -n "$KDIR" ] && [ -d "$KDIR" ] && [ -f "$KDIR/.config" ]; then
+          echo "=== 对内核 .config 运行 olddefconfig ==="
           cd "$KDIR"
-          make ARCH=arm64 olddefconfig </dev/null
-          echo "olddefconfig 完成"
+          make ARCH=arm64 olddefconfig </dev/null 2>&1 || true
+          cd $OLDPWD
+          echo "=== olddefconfig 完成 ==="
+          # 显示新增的 CONFIG
+          grep 'SCSI_HISI_SAS\|HISI_SAS_PCI\|SAS_ATA\|SAS_HOST_SMP' "$KDIR/.config" || true
         else
-          echo "WARNING: 未找到内核源码目录，跳过 olddefconfig"
+          echo "WARNING: 未找到内核源码或 .config，跳过 olddefconfig"
         fi
 
     - name: 编译固件
